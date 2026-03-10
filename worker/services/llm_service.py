@@ -4,6 +4,15 @@ from core.config import settings
 
 logger = logging.getLogger(__name__)
 
+# Substrings that indicate the model started echoing its own prompt back.
+_PROMPT_LEAK_MARKERS = [
+    "- All regular paragraph text.",
+    "NEVER MODIFY:",
+    "TRANSLATE:",
+    "Produce ONLY the",
+    "Text to translate:",
+]
+
 
 class LLMService:
     def __init__(self):
@@ -51,12 +60,22 @@ class LLMService:
             f"Text to translate:\n\n{text}"
         )
 
+    def _strip_prompt_leakage(self, output: str) -> str:
+        """Truncate at the first sign of the model echoing its own system prompt."""
+        for marker in _PROMPT_LEAK_MARKERS:
+            idx = output.find(marker)
+            if idx != -1:
+                logger.warning("Detected prompt leakage in LLM output; truncating response.")
+                return output[:idx].rstrip()
+        return output
+
     def _call_ollama(self, prompt: str) -> str:
         url = f"{self.api_url}/api/generate"
         payload = {"model": self.model, "prompt": prompt, "stream": False}
         response = requests.post(url, json=payload, timeout=self.timeout)
         response.raise_for_status()
-        return response.json().get("response", "").strip()
+        raw = response.json().get("response", "").strip()
+        return self._strip_prompt_leakage(raw)
 
     def translate_latex(self, text: str) -> str:
         if not text.strip():

@@ -17,13 +17,40 @@ _PASSTHROUGH_ENV_RE = re.compile(
 # Display math \[ ... \]
 _DISPLAY_MATH_RE = re.compile(r'^\s*\\\[.*\\\]\s*$', re.DOTALL)
 
+# Commands whose arguments are never translatable prose.
+# A line matching this pattern carries no human-readable text.
+_STRUCTURAL_LINE_RE = re.compile(
+    r'^\s*\\(?:'
+    r'newpage|clearpage|cleardoublepage|'
+    r'pagenumbering|setcounter|addtocounter|stepcounter|refstepcounter|'
+    r'pagestyle|thispagestyle|'
+    r'vspace\*?|hspace\*?|vfill|hfill|bigskip|medskip|smallskip|'
+    r'centering|raggedright|raggedleft|noindent|linebreak|pagebreak|'
+    r'hypersetup|geometry|newgeometry|restoregeometry|'
+    r'bibliographystyle|'
+    r'label|ref|cite|autoref|eqref|pageref|cref|Cref|'
+    r'input|include|includeonly|includegraphics'
+    r')(?:\*)?(?:\[.*?\])?(?:\{[^{}]*\})*\s*$'
+)
+
+
+def _is_structural_only(chunk: str) -> bool:
+    """Return True if every non-blank, non-comment line is a known structural command."""
+    for line in chunk.splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith('%'):
+            continue
+        if not _STRUCTURAL_LINE_RE.match(stripped):
+            return False
+    return True
+
 
 class LatexParser:
     def is_passthrough_chunk(self, chunk: str) -> bool:
         """
         Returns True if the chunk should NOT be sent to the LLM.
         Matches chunks that consist entirely of math or code environments,
-        or display-math blocks — content that must never be modified.
+        display-math blocks, or structural-only commands with no translatable text.
         """
         stripped = chunk.strip()
         if not stripped:
@@ -31,6 +58,8 @@ class LatexParser:
         if _PASSTHROUGH_ENV_RE.search(stripped):
             return True
         if _DISPLAY_MATH_RE.match(stripped):
+            return True
+        if _is_structural_only(stripped):
             return True
         return False
 

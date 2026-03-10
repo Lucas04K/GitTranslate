@@ -93,6 +93,11 @@ def _apply_delta(
                 translated_chunks.append(chunk)
                 continue
 
+            if parser.is_passthrough_chunk(chunk):
+                logger.debug(f"Skipping passthrough chunk {i + 1} (math/code/structural).")
+                translated_chunks.append(chunk)
+                continue
+
             logger.debug(f"Translating paragraph {i + 1}/{len(parsed['chunks'])} in {tex_file_rel_path}...")
             try:
                 translated_chunks.append(llm.translate_latex(chunk))

@@ -15,16 +15,40 @@ class LLMService:
 
     def _build_prompt(self, text: str) -> str:
         return (
-            f"You are a professional {self.source_lang} to {self.target_lang} translator. "
-            f"Your goal is to accurately convey the meaning and nuances of the original {self.source_lang} text "
-            f"while adhering to {self.target_lang} grammar, vocabulary, and cultural sensitivities.\n\n"
-            "CRITICAL LATEX RULES:\n"
-            "- NEVER modify, translate, or remove any LaTeX commands (e.g., \\section{}, \\maketitle, \\textbf{}).\n"
-            "- DO NOT use Markdown formatting (like ** or ##). Keep all LaTeX tags exactly as they are.\n"
-            "- If the text is purely a LaTeX command (like \\maketitle), return it exactly as it is.\n\n"
-            f"Produce only the {self.target_lang} translation, without any additional explanations or commentary. "
-            f"Please translate the following {self.source_lang} text into {self.target_lang}:\n\n\n"
-            f"{text}"
+            f"You are a professional {self.source_lang} to {self.target_lang} translator "
+            f"specializing in academic LaTeX documents.\n\n"
+
+            f"TRANSLATE:\n"
+            f"- All regular paragraph text.\n"
+            f"- Text arguments of heading and display commands:\n"
+            f"  \\chapter{{...}}, \\section{{...}}, \\subsection{{...}}, \\subsubsection{{...}},\n"
+            f"  \\paragraph{{...}}, \\caption{{...}}, \\title{{...}}, \\footnote{{...}},\n"
+            f"  \\emph{{...}}, \\textbf{{...}}, \\textit{{...}}, \\text{{...}}\n\n"
+
+            f"NEVER MODIFY:\n"
+            f"- LaTeX command names themselves (\\chapter stays \\chapter, etc.).\n"
+            f"- Math content: $...$, \\(...\\), \\[...\\], \\begin{{equation}} ... \\end{{equation}},\n"
+            f"  and all other math environments (align, gather, multline, etc.).\n"
+            f"- References and labels: \\ref{{...}}, \\cite{{...}}, \\label{{...}}, "
+            f"\\autoref{{...}}, \\eqref{{...}}, \\pageref{{...}}.\n"
+            f"- File inclusions: \\input{{...}}, \\include{{...}}, \\includegraphics{{...}}.\n"
+            f"- Code blocks: \\begin{{lstlisting}}, \\begin{{verbatim}}.\n"
+            f"- URLs: \\url{{...}}, the URL part of \\href{{URL}}{{text}} (translate only the text part).\n"
+            f"- Do NOT add Markdown formatting (**, ##, etc.).\n\n"
+
+            f"If the chunk contains ONLY structural commands with no translatable text "
+            f"(e.g. \\maketitle, \\tableofcontents), return it exactly as-is.\n\n"
+
+            f"Examples:\n"
+            f"  IN:  \\chapter{{Einleitung}}\n"
+            f"  OUT: \\chapter{{Introduction}}\n\n"
+            f"  IN:  \\section{{Grundlagen der maschinellen Übersetzung}}\n"
+            f"  OUT: \\section{{Fundamentals of Machine Translation}}\n\n"
+            f"  IN:  Die Methode wird in Abschnitt~\\ref{{sec:method}} beschrieben.\n"
+            f"  OUT: The method is described in Section~\\ref{{sec:method}}.\n\n"
+
+            f"Produce ONLY the {self.target_lang} translation — no explanations, no commentary.\n\n"
+            f"Text to translate:\n\n{text}"
         )
 
     def _call_ollama(self, prompt: str) -> str:

@@ -11,6 +11,20 @@ Both modes require Ollama running on the host machine.
 
 ---
 
+## Prerequisites: Docker
+
+1. Install Docker Desktop (includes Docker Compose):
+   https://www.docker.com/products/docker-desktop/
+   - macOS / Windows: download and run the installer
+   - Linux: follow the [Engine install guide](https://docs.docker.com/engine/install/) and install the Compose plugin separately
+2. Verify both are available:
+   ```bash
+   docker --version
+   docker compose version
+   ```
+
+---
+
 ## Prerequisites: Ollama
 
 1. Install Ollama: https://ollama.com/download
@@ -208,3 +222,38 @@ curl http://localhost:8000/
 ```
 
 Returns a JSON summary of current configuration.
+
+---
+
+## Troubleshooting
+
+### Worker crashes on startup with "Field required" validation errors
+The Docker image is stale. Rebuild it after any code or config change:
+```bash
+docker compose up -d --build worker
+```
+
+### 403 "Write access to repository not granted" on `/sync`
+Your token doesn't have the required permissions. For GitHub fine-grained PATs:
+
+- **Source repo** (`repo-de`): `Contents` → **Read**
+- **Target repo** (`repo-en`): `Contents` → **Read and Write**
+
+Go to: GitHub → Settings → Developer settings → Personal access tokens → Fine-grained tokens → Edit your token.
+
+> Tip: if the token appears in logs, regenerate it immediately.
+
+### "Remote branch main not found" on first `/sync`
+The target repo is empty and has no `main` branch yet. Initialise it before starting:
+
+**Option A — GitHub UI:** open the repo and click *Initialize this repository*.
+
+**Option B — command line:**
+```bash
+git clone https://github.com/youruser/repo-en.git
+cd repo-en
+git commit --allow-empty -m "init"
+git push origin main
+```
+
+Then trigger `/sync` again.

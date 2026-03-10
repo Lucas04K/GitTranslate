@@ -11,6 +11,20 @@ Beide Modi erfordern Ollama auf dem Host-Rechner.
 
 ---
 
+## Voraussetzungen: Docker
+
+1. Docker Desktop installieren (enthält Docker Compose):
+   https://www.docker.com/products/docker-desktop/
+   - macOS / Windows: Installer herunterladen und ausführen
+   - Linux: Der [Engine-Installationsanleitung](https://docs.docker.com/engine/install/) folgen und das Compose-Plugin separat installieren
+2. Verfügbarkeit prüfen:
+   ```bash
+   docker --version
+   docker compose version
+   ```
+
+---
+
 ## Voraussetzungen: Ollama
 
 1. Ollama installieren: https://ollama.com/download
@@ -127,7 +141,7 @@ Erforderliche Berechtigungen: `Contents` (Lesen für Quelle, Lesen+Schreiben fü
 ### 2. Nur den Worker starten
 
 ```bash
-docker compose up -d
+docker compose up worker -d
 ```
 
 Gitea und Datenbank werden nicht gestartet (diese erfordern `--profile local-git`).
@@ -208,3 +222,38 @@ curl http://localhost:8000/
 ```
 
 Gibt eine JSON-Zusammenfassung der aktuellen Konfiguration zurück.
+
+---
+
+## Fehlerbehebung
+
+### Worker startet nicht — "Field required"-Validierungsfehler
+Das Docker-Image ist veraltet. Nach jeder Code- oder Konfigurationsänderung neu bauen:
+```bash
+docker compose up -d --build worker
+```
+
+### 403 „Write access to repository not granted" bei `/sync`
+Das Token hat nicht die erforderlichen Berechtigungen. Für GitHub Fine-grained PATs:
+
+- **Quell-Repo** (`repo-de`): `Contents` → **Read**
+- **Ziel-Repo** (`repo-en`): `Contents` → **Read and Write**
+
+Pfad: GitHub → Einstellungen → Entwicklereinstellungen → Personal access tokens → Fine-grained tokens → Token bearbeiten.
+
+> Tipp: Wenn das Token in Logs sichtbar ist, sofort neu generieren.
+
+### „Remote branch main not found" beim ersten `/sync`
+Das Ziel-Repo ist leer und hat noch keinen `main`-Branch. Vor dem Start initialisieren:
+
+**Option A — GitHub UI:** Repo öffnen und auf *Initialize this repository* klicken.
+
+**Option B — Kommandozeile:**
+```bash
+git clone https://github.com/youruser/repo-en.git
+cd repo-en
+git commit --allow-empty -m "init"
+git push origin main
+```
+
+Danach `/sync` erneut aufrufen.

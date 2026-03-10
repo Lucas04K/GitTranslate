@@ -1,4 +1,5 @@
 import asyncio
+import fnmatch
 import os
 import hmac
 import hashlib
@@ -9,6 +10,7 @@ import logging
 from pathlib import Path
 from typing import Optional
 from fastapi import FastAPI, HTTPException, Request, BackgroundTasks
+from pydantic import BaseModel, Field
 
 from core.config import settings
 from services.git_service import GitService
@@ -22,7 +24,15 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-app = FastAPI(title="GitTranslate Worker")
+app = FastAPI(
+    title="GitTranslate Worker",
+    version="1.0.0",
+    description=(
+        "Watches a source LaTeX repo (German) and automatically translates "
+        "changed `.tex` files into a target repo (English) via a local LLM.\n\n"
+        "**Swagger UI:** `/docs` · **ReDoc:** `/redoc`"
+    ),
+)
 
 # --- State (persisted across restarts via mounted volume) ---
 STATE_FILE = Path("/app/state/sync_state.json")
@@ -39,6 +49,24 @@ def _save_last_sha(sha: str):
     STATE_FILE.write_text(json.dumps({"last_sha": sha}))
 
 
+# --- Ignore file helpers ---
+def _load_ignore_patterns(src_dir: Path) -> list[str]:
+    """Read .gittranslate-ignore from the source repo root. Returns list of glob patterns."""
+    ignore_file = src_dir / ".gittranslate-ignore"
+    if not ignore_file.exists():
+        return []
+    patterns = []
+    for line in ignore_file.read_text().splitlines():
+        line = line.strip()
+        if line and not line.startswith("#"):
+            patterns.append(line)
+    return patterns
+
+
+def _is_ignored(path: str, patterns: list[str]) -> bool:
+    return any(fnmatch.fnmatch(path, p) for p in patterns)
+
+
 # --- Shared delta logic ---
 def _apply_delta(
     git: GitService,
@@ -48,7 +76,19 @@ def _apply_delta(
     target_dir: str,
     changed_files: set,
     removed_files: set,
+    apply_ignore: bool = True,
+    commit_msg: Optional[str] = None,
 ):
+    if apply_ignore:
+        ignore_patterns = _load_ignore_patterns(Path(src_dir))
+        if ignore_patterns:
+            before = len(changed_files)
+            changed_files = {f for f in changed_files if not _is_ignored(f, ignore_patterns)}
+            removed_files = {f for f in removed_files if not _is_ignored(f, ignore_patterns)}
+            skipped = before - len(changed_files)
+            if skipped:
+                logger.info("Skipped %d file(s) due to .gittranslate-ignore", skipped)
+
     tex_to_translate = {f for f in changed_files if f.endswith(".tex")}
 
     logger.info(f"Changed/new files total: {len(changed_files)}")
@@ -111,10 +151,11 @@ def _apply_delta(
             f.write(final_content)
 
     # Commit and push
-    commit_msg = (
-        f"Auto-Sync: updated {len(changed_files)} file(s), "
-        f"translated {len(tex_to_translate)} .tex file(s)"
-    )
+    if commit_msg is None:
+        commit_msg = (
+            f"Auto-Sync: updated {len(changed_files)} file(s), "
+            f"translated {len(tex_to_translate)} .tex file(s)"
+        )
     git.commit_and_push(target_dir, commit_msg)
     logger.info("Delta-sync completed successfully.")
 
@@ -205,6 +246,32 @@ def process_sync_job():
             logger.error(f"Sync job failed: {e}")
 
 
+# --- Manual translate job ---
+def _translate_specific(paths: list[str], use_ignore: bool = False):
+    """Translate specific paths on demand."""
+    logger.info("Starting manual translation job for %d file(s)...", len(paths))
+    git = GitService()
+    llm = LLMService()
+    parser = LatexParser()
+
+    with tempfile.TemporaryDirectory() as temp_dir:
+        src_dir = os.path.join(temp_dir, "src")
+        target_dir = os.path.join(temp_dir, "target")
+        try:
+            git.clone_src(src_dir)
+            git.clone_target(target_dir)
+            _apply_delta(
+                git, llm, parser,
+                src_dir, target_dir,
+                changed_files=set(paths),
+                removed_files=set(),
+                apply_ignore=use_ignore,
+                commit_msg=f"GitTranslate: manual translate {len(paths)} file(s)",
+            )
+        except Exception as e:
+            logger.error(f"Manual translate job failed: {e}")
+
+
 # --- Sync lock + runner ---
 _sync_lock = asyncio.Lock()
 
@@ -227,6 +294,22 @@ async def _poll_loop():
         await asyncio.sleep(settings.poll_interval)
         if not _sync_lock.locked():
             asyncio.create_task(_run_locked_sync())
+
+
+# --- Request / Response models ---
+class TranslateRequest(BaseModel):
+    paths: list[str] = Field(
+        ...,
+        description="Relative paths of .tex files to translate (e.g. ['chapters/01_intro.tex'])",
+        examples=[["chapters/01_introduction.tex", "chapters/03_methodology.tex"]],
+    )
+    use_ignore: bool = Field(
+        False,
+        description=(
+            "When True, paths listed in .gittranslate-ignore are silently skipped, "
+            "just like /webhook and /sync. Default False — all listed paths are translated."
+        ),
+    )
 
 
 # --- API Routes ---
@@ -270,3 +353,19 @@ async def sync(background_tasks: BackgroundTasks):
         raise HTTPException(status_code=409, detail="Sync already in progress")
     background_tasks.add_task(_run_locked_sync)
     return {"status": "accepted"}
+
+
+@app.post("/translate", summary="Translate specific file paths on demand")
+async def translate_paths(req: TranslateRequest, background_tasks: BackgroundTasks):
+    """
+    Clone both repos, translate only the requested `.tex` files, and push.
+
+    - `use_ignore=false` (default): `.gittranslate-ignore` is bypassed — all paths are translated.
+    - `use_ignore=true`: paths matching `.gittranslate-ignore` patterns are silently skipped.
+    - Non-`.tex` paths are copied unchanged (no translation attempted).
+    - Returns 409 if a sync is already in progress.
+    """
+    if _sync_lock.locked():
+        raise HTTPException(status_code=409, detail="Sync already in progress")
+    background_tasks.add_task(_translate_specific, req.paths, req.use_ignore)
+    return {"status": "accepted", "paths": req.paths}

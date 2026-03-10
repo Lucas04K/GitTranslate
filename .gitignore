@@ -15,6 +15,7 @@ build/
 .venv/
 venv/
 ENV/
+.idea
 
 # ===========================================
 #  Environment / secrets

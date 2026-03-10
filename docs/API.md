@@ -52,10 +52,11 @@ Receives a Gitea push webhook, extracts added/modified/removed files from commit
 
 | Header | Description |
 |---|---|
-| `X-Hub-Signature-256` | `sha256=<hex>` HMAC signature of the raw JSON body |
-| `X-Gitea-Signature` | Alternative header name accepted by Gitea |
+| `X-Hub-Signature-256` | `sha256=<hex>` HMAC signature of the raw JSON body (GitHub) |
+| `X-Gitea-Signature` | `<hex>` HMAC signature (Gitea) |
+| `X-Gitlab-Token` | Raw plaintext secret (GitLab) — compared with constant-time equality |
 
-If `WEBHOOK_SECRET` is set in `.env` and the signature is missing or invalid, the request is rejected with `401`.
+If `WEBHOOK_SECRET` is set in `.env` and the signature/token is missing or invalid, the request is rejected with `401`.
 
 **Request body** — raw Gitea push event JSON (sent automatically by Gitea).
 

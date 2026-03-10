@@ -195,9 +195,10 @@ ngrok http 8000
 
 Set `WEBHOOK_SECRET` in `.env` and use the same value in your Git provider's webhook settings.
 
-GitTranslate accepts both:
-- **GitHub format**: `X-Hub-Signature-256: sha256=<hex>`
-- **Gitea format**: `X-Gitea-Signature: <hex>`
+GitTranslate accepts all three provider formats:
+- **GitHub format**: `X-Hub-Signature-256: sha256=<hex>` (HMAC-SHA256)
+- **Gitea format**: `X-Gitea-Signature: <hex>` (HMAC-SHA256)
+- **GitLab format**: `X-Gitlab-Token: <secret>` (plaintext equality check)
 
 Invalid requests return HTTP 401.
 

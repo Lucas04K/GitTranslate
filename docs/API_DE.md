@@ -52,10 +52,11 @@ Empfängt einen Gitea-Push-Webhook, extrahiert hinzugefügte/geänderte/entfernt
 
 | Header | Beschreibung |
 |---|---|
-| `X-Hub-Signature-256` | `sha256=<hex>` HMAC-Signatur des rohen JSON-Bodys |
-| `X-Gitea-Signature` | Alternativer Header-Name, der von Gitea verwendet wird |
+| `X-Hub-Signature-256` | `sha256=<hex>` HMAC-Signatur des rohen JSON-Bodys (GitHub) |
+| `X-Gitea-Signature` | `<hex>` HMAC-Signatur (Gitea) |
+| `X-Gitlab-Token` | Rohes Klartext-Geheimnis (GitLab) — Vergleich mit konstantem Zeitaufwand |
 
-Wenn `WEBHOOK_SECRET` in `.env` gesetzt ist und die Signatur fehlt oder ungültig ist, wird die Anfrage mit `401` abgelehnt.
+Wenn `WEBHOOK_SECRET` in `.env` gesetzt ist und die Signatur/das Token fehlt oder ungültig ist, wird die Anfrage mit `401` abgelehnt.
 
 **Anfrage-Body** — roher Gitea-Push-Event-JSON (wird automatisch von Gitea gesendet).
 

@@ -3,6 +3,7 @@ import fnmatch
 import os
 import hmac
 import hashlib
+import secrets
 import json
 import shutil
 import tempfile
@@ -161,12 +162,23 @@ def _apply_delta(
 
 
 # --- Webhook job ---
-def _verify_webhook_secret(payload_bytes: bytes, sig_header: str) -> bool:
+def _verify_webhook_secret(payload_bytes: bytes, request_headers) -> bool:
     if not settings.webhook_secret:
         return True
+
+    # GitLab: X-Gitlab-Token is the raw secret (plain equality, no HMAC)
+    gitlab_token = request_headers.get("X-Gitlab-Token")
+    if gitlab_token is not None:
+        return secrets.compare_digest(gitlab_token, settings.webhook_secret)
+
+    # GitHub / Gitea: HMAC-SHA256 signature
+    sig = (
+        request_headers.get("X-Hub-Signature-256")
+        or request_headers.get("X-Gitea-Signature", "")
+    )
     secret = settings.webhook_secret.encode("utf-8")
     expected_hex = hmac.new(secret, payload_bytes, hashlib.sha256).hexdigest()
-    actual_hex = sig_header.removeprefix("sha256=") if sig_header else ""
+    actual_hex = sig.removeprefix("sha256=") if sig else ""
     return hmac.compare_digest(expected_hex, actual_hex)
 
 
@@ -330,13 +342,8 @@ async def health():
 async def webhook(request: Request, background_tasks: BackgroundTasks):
     raw_body = await request.body()
 
-    if settings.webhook_secret:
-        sig = (
-            request.headers.get("X-Hub-Signature-256")
-            or request.headers.get("X-Gitea-Signature", "")
-        )
-        if not _verify_webhook_secret(raw_body, sig):
-            raise HTTPException(status_code=401, detail="Invalid webhook signature")
+    if not _verify_webhook_secret(raw_body, request.headers):
+        raise HTTPException(status_code=401, detail="Invalid webhook signature")
 
     try:
         payload = json.loads(raw_body)

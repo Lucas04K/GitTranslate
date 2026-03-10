@@ -1,0 +1,76 @@
+networks:
+  gittranslate_net:
+    driver: bridge
+
+volumes:
+  gitea_data:
+  db_data:
+
+services:
+  # --- 1. Datenbank (Postgres) ---
+  db:
+    image: postgres:${DB_IMAGE_VERSION:-15-alpine}
+    restart: always
+    environment:
+      POSTGRES_USER: ${DB_USER:-gitea}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-gitea123}
+      POSTGRES_DB: ${DB_NAME:-gitea}
+    volumes:
+      - db_data:/var/lib/postgresql/data
+    networks:
+      - gittranslate_net
+
+  # --- 2. Git Hosting (Gitea) ---
+  gitea:
+    image: gitea/gitea:${GITEA_VERSION:-latest}
+    restart: always
+    environment:
+      - USER_UID=1000
+      - USER_GID=1000
+      - GITEA__service__ENABLE_REGISTRATION=${GITEA_ENABLE_REG:-true}
+      - GITEA__database__DB_TYPE=postgres
+      - GITEA__database__HOST=db:5432
+      - GITEA__database__NAME=${DB_NAME:-gitea}
+      - GITEA__database__USER=${DB_USER:-gitea}
+      - GITEA__database__PASSWD=${DB_PASSWORD:-gitea123}
+      - ROOT_PASSWORD=${GITEA_ROOT_PASSWORD:-admin123}
+      - GITEA__webhook__ALLOWED_HOST_LIST=*
+    ports:
+      - "${GITEA_HTTP_PORT:-3000}:3000"
+      - "${GITEA_SSH_PORT:-2222}:22"
+    volumes:
+      - gitea_data:/data
+    networks:
+      - gittranslate_net
+    depends_on:
+      - db
+
+  # --- 3. Übersetzungs-Worker (FastAPI) ---
+  worker:
+    build: ./worker
+    restart: always
+    environment:
+      # Gitea Konfig
+      - GITEA_URL=http://gitea:3000
+      - GITEA_TOKEN=${GITEA_TOKEN}
+      - SRC_REPO_PATH=${SRC_REPO_PATH:-}
+      - TARGET_REPO_PATH=${TARGET_REPO_PATH:-}
+
+      # Ollama Konfig (WICHTIG: Alles aus .env)
+      - OLLAMA_HOST=${OLLAMA_HOST:-http://host.docker.internal:11434}
+      - OLLAMA_MODEL=${OLLAMA_MODEL:-}
+      - OLLAMA_TIMEOUT=${OLLAMA_TIMEOUT:-60}
+
+      # Logging & Debug
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+    ports:
+      - "${WORKER_PORT:-8000}:8000"
+    networks:
+      - gittranslate_net
+    depends_on:
+      - gitea
+      - db
+
+    # Host-Access für Windows/Mac/Linux
+    extra_hosts:
+      - "host.docker.internal:host-gateway"

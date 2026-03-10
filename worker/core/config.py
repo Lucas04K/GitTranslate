@@ -3,28 +3,33 @@ from typing import Optional
 
 
 class Settings(BaseSettings):
-    # Gitea
-    gitea_url: str
-    gitea_token: Optional[str] = None
-    src_repo_path: str
-    target_repo_path: str
-
-    # Ollama (mit sinnvollen Defaults)
-    ollama_host: str = "http://host.docker.internal:11434"
-    ollama_model: str
-    ollama_timeout: int = 120
-
+    # Git: Source repo
+    src_git_url: str
+    src_git_token: Optional[str] = None
+    # Git: Target repo
+    target_git_url: str
+    target_git_token: Optional[str] = None
+    # Git behavior
+    git_branch: str = "main"
+    git_author_name: str = "GitTranslate Bot"
+    git_author_email: str = "bot@gittranslate.local"
+    # LLM (Ollama only)
+    llm_api_url: str = "http://host.docker.internal:11434"
+    llm_model: str
+    llm_timeout: int = 120
+    # Translation
+    source_lang: str = "German"
+    target_lang: str = "English"
+    # Webhook security
+    webhook_secret: Optional[str] = None
+    # Sync / polling
+    poll_interval: int = 0          # seconds; 0 = manual /sync only
     # Logging
     log_level: str = "INFO"
 
-    # Pydantic liest automatisch aus der .env Datei
     model_config = SettingsConfigDict(
-        env_file=".env",
-        env_file_encoding="utf-8",
-        extra="ignore"  # Ignoriert .env Variablen, die hier nicht definiert sind (wie DB_PASSWORD)
+        env_file=".env", env_file_encoding="utf-8", extra="ignore"
     )
 
 
-# Wir instanziieren die Settings genau einmal.
-# Diese Variable importieren wir später überall.
 settings = Settings()

@@ -7,57 +7,49 @@ logger = logging.getLogger(__name__)
 
 class LLMService:
     def __init__(self):
-        self.host = settings.ollama_host
-        self.model = settings.ollama_model
-        self.timeout = settings.ollama_timeout
-        self.api_url = f"{self.host}/api/generate"
+        self.api_url = settings.llm_api_url
+        self.model = settings.llm_model
+        self.timeout = settings.llm_timeout
+        self.source_lang = settings.source_lang
+        self.target_lang = settings.target_lang
 
-    def translate_latex(self, text: str) -> str:
-        """
-        Sendet den Text an Ollama und nutzt das offizielle TranslateGemma Prompt-Format,
-        kombiniert mit strikten LaTeX-Regeln.
-        """
-        if not text.strip():
-            return text
-
-        # Wir bauen den exakten Prompt nach der offiziellen Dokumentation auf
-        # und betten unsere LaTeX-Regeln nahtlos ein.
-        full_prompt = (
-            "You are a professional German (de) to English (en) translator. "
-            "Your goal is to accurately convey the meaning and nuances of the original German text "
-            "while adhering to English grammar, vocabulary, and cultural sensitivities.\n\n"
+    def _build_prompt(self, text: str) -> str:
+        return (
+            f"You are a professional {self.source_lang} to {self.target_lang} translator. "
+            f"Your goal is to accurately convey the meaning and nuances of the original {self.source_lang} text "
+            f"while adhering to {self.target_lang} grammar, vocabulary, and cultural sensitivities.\n\n"
             "CRITICAL LATEX RULES:\n"
             "- NEVER modify, translate, or remove any LaTeX commands (e.g., \\section{}, \\maketitle, \\textbf{}).\n"
             "- DO NOT use Markdown formatting (like ** or ##). Keep all LaTeX tags exactly as they are.\n"
             "- If the text is purely a LaTeX command (like \\maketitle), return it exactly as it is.\n\n"
-            "Produce only the English translation, without any additional explanations or commentary. "
-            "Please translate the following German text into English:\n\n\n"
+            f"Produce only the {self.target_lang} translation, without any additional explanations or commentary. "
+            f"Please translate the following {self.source_lang} text into {self.target_lang}:\n\n\n"
             f"{text}"
         )
 
-        # Da TranslateGemma "a single user message" erwartet,
-        # packen wir alles in den 'prompt' und lassen 'system' weg.
-        payload = {
-            "model": self.model,
-            "prompt": full_prompt,
-            "stream": False
-        }
+    def _call_ollama(self, prompt: str) -> str:
+        url = f"{self.api_url}/api/generate"
+        payload = {"model": self.model, "prompt": prompt, "stream": False}
+        response = requests.post(url, json=payload, timeout=self.timeout)
+        response.raise_for_status()
+        return response.json().get("response", "").strip()
+
+    def translate_latex(self, text: str) -> str:
+        if not text.strip():
+            return text
+
+        prompt = self._build_prompt(text)
 
         try:
-            logger.info(f"Sende Textblock an Ollama (Modell: {self.model})...")
-            response = requests.post(self.api_url, json=payload, timeout=self.timeout)
-            response.raise_for_status()
-
-            result = response.json()
-            translated_text = result.get("response", "").strip()
-            return translated_text
+            logger.info(f"Sending chunk to Ollama (model: {self.model})...")
+            return self._call_ollama(prompt)
 
         except requests.exceptions.Timeout:
-            logger.error(f"Ollama Timeout! Das Modell hat nicht innerhalb von {self.timeout} Sekunden geantwortet.")
-            raise RuntimeError(f"LLM Timeout nach {self.timeout}s")
+            logger.error(f"LLM timeout after {self.timeout}s.")
+            raise RuntimeError(f"LLM Timeout after {self.timeout}s")
         except requests.exceptions.ConnectionError:
-            logger.error(f"Verbindung zu Ollama fehlgeschlagen. Läuft der Dienst auf {self.host}?")
-            raise RuntimeError("Ollama Connection Error")
+            logger.error(f"Connection to LLM failed at {self.api_url}.")
+            raise RuntimeError("LLM Connection Error")
         except requests.exceptions.RequestException as e:
-            logger.error(f"Unerwarteter Fehler bei der Kommunikation mit Ollama: {e}")
-            raise RuntimeError(f"Ollama API Error: {e}")
+            logger.error(f"Unexpected LLM API error: {e}")
+            raise RuntimeError(f"LLM API Error: {e}")

@@ -5,10 +5,12 @@ networks:
 volumes:
   gitea_data:
   db_data:
+  worker_state:
 
 services:
-  # --- 1. Datenbank (Postgres) ---
+  # --- 1. Database (Postgres) — local-git profile only ---
   db:
+    profiles: ["local-git"]
     image: postgres:${DB_IMAGE_VERSION:-15-alpine}
     restart: always
     environment:
@@ -19,9 +21,15 @@ services:
       - db_data:/var/lib/postgresql/data
     networks:
       - gittranslate_net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-gitea}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
-  # --- 2. Git Hosting (Gitea) ---
+  # --- 2. Git Hosting (Gitea) — local-git profile only ---
   gitea:
+    profiles: ["local-git"]
     image: gitea/gitea:${GITEA_VERSION:-latest}
     restart: always
     environment:
@@ -43,34 +51,32 @@ services:
     networks:
       - gittranslate_net
     depends_on:
-      - db
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:3000/ || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
 
-  # --- 3. Übersetzungs-Worker (FastAPI) ---
+  # --- 3. Translation Worker (FastAPI) ---
   worker:
     build: ./worker
     restart: always
-    environment:
-      # Gitea Konfig
-      - GITEA_URL=http://gitea:3000
-      - GITEA_TOKEN=${GITEA_TOKEN}
-      - SRC_REPO_PATH=${SRC_REPO_PATH:-}
-      - TARGET_REPO_PATH=${TARGET_REPO_PATH:-}
-
-      # Ollama Konfig (WICHTIG: Alles aus .env)
-      - OLLAMA_HOST=${OLLAMA_HOST:-http://host.docker.internal:11434}
-      - OLLAMA_MODEL=${OLLAMA_MODEL:-}
-      - OLLAMA_TIMEOUT=${OLLAMA_TIMEOUT:-60}
-
-      # Logging & Debug
-      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+    env_file: .env
     ports:
       - "${WORKER_PORT:-8000}:8000"
     networks:
       - gittranslate_net
-    depends_on:
-      - gitea
-      - db
-
-    # Host-Access für Windows/Mac/Linux
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8000/ || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    volumes:
+      - worker_state:/app/state
+    # Host access for Ollama on macOS/Windows/Linux
     extra_hosts:
       - "host.docker.internal:host-gateway"

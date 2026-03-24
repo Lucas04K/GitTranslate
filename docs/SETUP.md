@@ -1,218 +1,176 @@
-# GitTranslate Setup Guide
+# GitTranslate Einrichtungsanleitung
 
-GitTranslate supports two usage modes:
-
-| Mode | Git provider | When to use |
-|------|-------------|-------------|
-| **A – Local** | Gitea (self-hosted, via Docker) | Local development / air-gapped setup |
-| **B – External** | GitHub, GitLab, any Gitea instance | Production / existing repos |
-
-Both modes require Ollama running on the host machine.
+GitTranslate funktioniert mit jedem externen Git-Anbieter (GitHub, GitLab, Gitea, etc.). Es kann mit Docker oder direkt mit Python betrieben werden.
 
 ---
 
-## Prerequisites: Docker
+## Voraussetzungen: Ollama
 
-1. Install Docker Desktop (includes Docker Compose):
-   https://www.docker.com/products/docker-desktop/
-   - macOS / Windows: download and run the installer
-   - Linux: follow the [Engine install guide](https://docs.docker.com/engine/install/) and install the Compose plugin separately
-2. Verify both are available:
-   ```bash
-   docker --version
-   docker compose version
-   ```
-
----
-
-## Prerequisites: Ollama
-
-1. Install Ollama: https://ollama.com/download
-2. Pull a model:
+1. Ollama installieren: https://ollama.com/download
+2. Ein Modell herunterladen:
    ```bash
    ollama pull translategemma:4b
    ```
-3. Verify it's running: `curl http://localhost:11434/`
+3. Betrieb prüfen: `curl http://localhost:11434/`
 
 ---
 
-## Mode A — Local Gitea + Ollama
+## Option A — Mit Docker
 
-### 1. Configure `.env`
+### 1. Docker installieren
 
-Copy the example and fill in the values:
+Docker Desktop installieren (enthält Docker Compose):
+https://www.docker.com/products/docker-desktop/
+- macOS / Windows: Installer herunterladen und ausführen
+- Linux: Der [Engine-Installationsanleitung](https://docs.docker.com/engine/install/) folgen und das Compose-Plugin separat installieren
+
+Verfügbarkeit prüfen:
 ```bash
-cp .env.example .env
+docker --version
+docker compose version
 ```
 
-Set at minimum:
-```
-SRC_GIT_URL=http://gitea:3000/admin/repo-de
-TARGET_GIT_URL=http://gitea:3000/admin/repo-en
-LLM_MODEL=translategemma:4b
-```
-Leave `SRC_GIT_TOKEN` / `TARGET_GIT_TOKEN` blank for now — you'll fill them in after Gitea starts.
-
-### 2. Start all services
-
-```bash
-docker compose --profile local-git up -d
-```
-
-### 3. Gitea first-run wizard
-
-Open http://localhost:3000 (or `GITEA_HTTP_PORT` if changed).
-
-- The first account you create becomes the admin.
-- Accept all database defaults (already configured via environment).
-
-### 4. Create repositories
-
-In Gitea's web UI:
-- Create `repo-de` (source, German)
-- Create `repo-en` (target, English)
-
-Or via API:
-```bash
-curl -s -X POST http://localhost:3000/api/v1/user/repos \
-  -u admin:admin123 -H "Content-Type: application/json" \
-  -d '{"name":"repo-de","private":false}'
-```
-
-### 5. Generate an access token
-
-**Gitea UI → User Settings → Applications → Generate Token**
-
-Paste the token into `.env`:
-```
-SRC_GIT_TOKEN=<token>
-TARGET_GIT_TOKEN=<token>
-```
-
-### 6. Rebuild the worker
-
-```bash
-docker compose --profile local-git up -d --build worker
-```
-
-### 7. Configure the webhook
-
-In Gitea: **repo-de → Settings → Webhooks → Add Webhook → Gitea**
-
-- **Target URL**: `http://worker:8000/webhook`
-  (use `http://host.docker.internal:8000/webhook` if worker is outside Docker)
-- **Content type**: `application/json`
-- **Secret**: optionally set a value and add it to `.env` as `WEBHOOK_SECRET`
-- **Trigger**: Push events
-
-### 8. Test
-
-Push a `.tex` file to `repo-de`. Watch logs:
-```bash
-docker compose logs -f worker
-```
-
----
-
-## Mode B — External Git (GitHub / GitLab) + Ollama
-
-### 1. Configure `.env`
+### 2. `.env` konfigurieren
 
 ```bash
 cp .env.example .env
 ```
 
-Set the full HTTPS URLs and personal access tokens for your repos:
+Vollständige HTTPS-URLs und persönliche Zugriffstoken für die Repos setzen:
 ```
-SRC_GIT_URL=https://github.com/youruser/repo-de
+SRC_GIT_URL=https://github.com/youruser/thesis-de
 SRC_GIT_TOKEN=ghp_xxxxxxxxxxxx
 
-TARGET_GIT_URL=https://github.com/youruser/repo-en
+TARGET_GIT_URL=https://github.com/youruser/thesis-en
 TARGET_GIT_TOKEN=ghp_xxxxxxxxxxxx
 
 LLM_MODEL=translategemma:4b
+LLM_API_URL=http://host.docker.internal:11434
 ```
 
-**GitHub**: Settings → Developer settings → Personal access tokens → Fine-grained
-Required scopes: `Contents` (read for source, read+write for target)
+**GitHub**: Einstellungen → Entwicklereinstellungen → Personal access tokens → Fine-grained
+Erforderliche Berechtigungen: `Contents` (Lesen für Quelle, Lesen+Schreiben für Ziel)
 
-**GitLab**: User Settings → Access Tokens → `read_repository` + `write_repository`
+**GitLab**: Benutzereinstellungen → Zugriffstoken → `read_repository` + `write_repository`
 
-### 2. Start only the worker
+### 3. Worker starten
 
 ```bash
 docker compose up -d
 ```
 
-No Gitea or database will start (they require `--profile local-git`).
-
-### 3. Trigger translation with `/sync`
-
-No webhook or public URL needed. Use `POST /sync` to check for new commits and translate:
+### 4. Übersetzung auslösen
 
 ```bash
-# One-off manual sync
 curl -X POST http://localhost:8000/sync
 ```
 
-The worker compares the current HEAD SHA against the last processed SHA (stored in a Docker volume). On the first call it translates all `.tex` files in the source repo. Subsequent calls only process changed files.
+Der Worker vergleicht den aktuellen HEAD SHA mit dem zuletzt verarbeiteten SHA (gespeichert in einem Docker-Volume). Beim ersten Aufruf werden alle `.tex`-Dateien im Quell-Repo übersetzt. Folgeaufrufe verarbeiten nur geänderte Dateien.
 
-### 4. Automate syncing
+---
 
-**Option A — cron job** (e.g. every 5 minutes):
+## Option B — Ohne Docker
+
+### 1. Voraussetzungen
+
+- Python 3.10+
+- Git
+- Ollama (siehe oben)
+
+### 2. `.env` konfigurieren
+
+```bash
+cp .env.example .env
+```
+
+Repos, Tokens und Modell setzen:
+```
+SRC_GIT_URL=https://github.com/youruser/thesis-de
+SRC_GIT_TOKEN=ghp_xxxxxxxxxxxx
+
+TARGET_GIT_URL=https://github.com/youruser/thesis-en
+TARGET_GIT_TOKEN=ghp_xxxxxxxxxxxx
+
+LLM_MODEL=translategemma:4b
+LLM_API_URL=http://localhost:11434
+STATE_DIR=./state
+```
+
+> **Wichtig:** `STATE_DIR=./state` setzen, damit der Sync-Status lokal gespeichert wird (der Standard `/app/state` gilt nur innerhalb von Docker).
+
+### 3. Abhängigkeiten installieren und starten
+
+```bash
+cd worker
+pip install -r requirements.txt
+uvicorn main:app --host 0.0.0.0 --port 8000
+```
+
+### 4. Übersetzung auslösen
+
+In einem anderen Terminal:
+```bash
+curl -X POST http://localhost:8000/sync
+```
+
+---
+
+## Sync automatisieren
+
+**Option A — Cron-Job** (z. B. alle 5 Minuten):
 ```
 */5 * * * * curl -s -X POST http://localhost:8000/sync
 ```
 
-**Option B — built-in polling**: set `POLL_INTERVAL` in `.env` (seconds):
+**Option B — Integriertes Polling**: `POLL_INTERVAL` in `.env` setzen (Sekunden):
 ```
 POLL_INTERVAL=300
 ```
-The worker will poll automatically on startup, no external scheduler needed.
+Der Worker pollt automatisch beim Start, kein externer Scheduler erforderlich.
 
-**Option C — webhooks** (requires a public URL / tunnel):
+**Option C — Webhooks** (erfordert eine öffentliche URL / Tunnel):
 
-For local development, use a tunnel (e.g. [ngrok](https://ngrok.com)):
+Für lokale Entwicklung einen Tunnel verwenden (z. B. [ngrok](https://ngrok.com)):
 ```bash
 ngrok http 8000
 # → https://abc123.ngrok.io
 ```
 
-**GitHub**: repo → Settings → Webhooks → Add webhook
+**GitHub**: Repo → Einstellungen → Webhooks → Webhook hinzufügen
 - **Payload URL**: `https://abc123.ngrok.io/webhook`
 - **Content type**: `application/json`
-- **Secret**: set a value here and in `.env` as `WEBHOOK_SECRET`
-- **Events**: Just the push event
+- **Secret**: Einen Wert hier und in `.env` als `WEBHOOK_SECRET` setzen
+- **Ereignisse**: Nur das Push-Ereignis
 
-**GitLab**: repo → Settings → Webhooks
+**GitLab**: Repo → Einstellungen → Webhooks
 - **URL**: `https://abc123.ngrok.io/webhook`
-- **Secret token**: same as `WEBHOOK_SECRET`
-- **Trigger**: Push events
+- **Secret token**: gleich wie `WEBHOOK_SECRET`
+- **Auslöser**: Push-Ereignisse
 
 ---
 
-## Webhook Secret Validation
+## Webhook-Geheimnisvalidierung
 
-Set `WEBHOOK_SECRET` in `.env` and use the same value in your Git provider's webhook settings.
+`WEBHOOK_SECRET` in `.env` setzen und denselben Wert in den Webhook-Einstellungen des Git-Anbieters verwenden.
 
-GitTranslate accepts all three provider formats:
-- **GitHub format**: `X-Hub-Signature-256: sha256=<hex>` (HMAC-SHA256)
-- **Gitea format**: `X-Gitea-Signature: <hex>` (HMAC-SHA256)
-- **GitLab format**: `X-Gitlab-Token: <secret>` (plaintext equality check)
+GitTranslate akzeptiert alle gängigen Anbieterformate:
+- **GitHub-Format**: `X-Hub-Signature-256: sha256=<hex>` (HMAC-SHA256)
+- **Gitea-Format**: `X-Gitea-Signature: <hex>` (HMAC-SHA256)
+- **GitLab-Format**: `X-Gitlab-Token: <Geheimnis>` (Klartextvergleich)
 
-Invalid requests return HTTP 401.
+Ungültige Anfragen erhalten HTTP 401 zurück.
 
 ---
 
-## Configuring Language Pair
+## Sprachpaar konfigurieren
 
-The source and target languages are configurable:
+Quell- und Zielsprache sind konfigurierbar:
 ```
 SOURCE_LANG=German
 TARGET_LANG=English
 ```
 
-Change these to any language pair your LLM supports.
+Diese auf ein beliebiges Sprachpaar ändern, das das LLM unterstützt.
 
 ---
 
@@ -222,39 +180,39 @@ Change these to any language pair your LLM supports.
 curl http://localhost:8000/
 ```
 
-Returns a JSON summary of current configuration.
+Gibt eine JSON-Zusammenfassung der aktuellen Konfiguration zurück.
 
 ---
 
-## Troubleshooting
+## Fehlerbehebung
 
-### Worker crashes on startup with "Field required" validation errors
-The Docker image is stale. Rebuild it after any code or config change:
+### Worker startet nicht — "Field required"-Validierungsfehler
+Das Docker-Image ist veraltet. Nach jeder Code- oder Konfigurationsänderung neu bauen:
 ```bash
 docker compose up -d --build worker
 ```
 
-### 403 "Write access to repository not granted" on `/sync`
-Your token doesn't have the required permissions. For GitHub fine-grained PATs:
+### 403 „Write access to repository not granted" bei `/sync`
+Das Token hat nicht die erforderlichen Berechtigungen. Für GitHub Fine-grained PATs:
 
-- **Source repo** (`repo-de`): `Contents` → **Read**
-- **Target repo** (`repo-en`): `Contents` → **Read and Write**
+- **Quell-Repo** (`thesis-de`): `Contents` → **Read**
+- **Ziel-Repo** (`thesis-en`): `Contents` → **Read and Write**
 
-Go to: GitHub → Settings → Developer settings → Personal access tokens → Fine-grained tokens → Edit your token.
+Pfad: GitHub → Einstellungen → Entwicklereinstellungen → Personal access tokens → Fine-grained tokens → Token bearbeiten.
 
-> Tip: if the token appears in logs, regenerate it immediately.
+> Tipp: Wenn das Token in Logs sichtbar ist, sofort neu generieren.
 
-### "Remote branch main not found" on first `/sync`
-The target repo is empty and has no `main` branch yet. Initialise it before starting:
+### „Remote branch main not found" beim ersten `/sync`
+Das Ziel-Repo ist leer und hat noch keinen `main`-Branch. Vor dem Start initialisieren:
 
-**Option A — GitHub UI:** open the repo and click *Initialize this repository*.
+**Option A — GitHub UI:** Repo öffnen und auf *Initialize this repository* klicken.
 
-**Option B — command line:**
+**Option B — Kommandozeile:**
 ```bash
-git clone https://github.com/youruser/repo-en.git
-cd repo-en
+git clone https://github.com/youruser/thesis-en.git
+cd thesis-en
 git commit --allow-empty -m "init"
 git push origin main
 ```
 
-Then trigger `/sync` again.
+Danach `/sync` erneut aufrufen.

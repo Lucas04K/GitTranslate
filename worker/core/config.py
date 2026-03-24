@@ -14,7 +14,7 @@ class Settings(BaseSettings):
     git_author_name: str = "GitTranslate Bot"
     git_author_email: str = "bot@gittranslate.local"
     # LLM (Ollama only)
-    llm_api_url: str = "http://host.docker.internal:11434"
+    llm_api_url: str = "http://localhost:11434"
     llm_model: str
     llm_timeout: int = 120
     # Translation
@@ -24,6 +24,8 @@ class Settings(BaseSettings):
     webhook_secret: Optional[str] = None
     # Sync / polling
     poll_interval: int = 0          # seconds; 0 = manual /sync only
+    # State persistence
+    state_dir: str = "/app/state"
     # Logging
     log_level: str = "INFO"
 

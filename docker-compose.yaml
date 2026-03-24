@@ -1,74 +1,13 @@
-networks:
-  gittranslate_net:
-    driver: bridge
-
 volumes:
-  gitea_data:
-  db_data:
   worker_state:
 
 services:
-  # --- 1. Database (Postgres) — local-git profile only ---
-  db:
-    profiles: ["local-git"]
-    image: postgres:${DB_IMAGE_VERSION:-15-alpine}
-    restart: always
-    environment:
-      POSTGRES_USER: ${DB_USER:-gitea}
-      POSTGRES_PASSWORD: ${DB_PASSWORD:-gitea123}
-      POSTGRES_DB: ${DB_NAME:-gitea}
-    volumes:
-      - db_data:/var/lib/postgresql/data
-    networks:
-      - gittranslate_net
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-gitea}"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-
-  # --- 2. Git Hosting (Gitea) — local-git profile only ---
-  gitea:
-    profiles: ["local-git"]
-    image: gitea/gitea:${GITEA_VERSION:-latest}
-    restart: always
-    environment:
-      - USER_UID=1000
-      - USER_GID=1000
-      - GITEA__service__ENABLE_REGISTRATION=${GITEA_ENABLE_REG:-true}
-      - GITEA__database__DB_TYPE=postgres
-      - GITEA__database__HOST=db:5432
-      - GITEA__database__NAME=${DB_NAME:-gitea}
-      - GITEA__database__USER=${DB_USER:-gitea}
-      - GITEA__database__PASSWD=${DB_PASSWORD:-gitea123}
-      - ROOT_PASSWORD=${GITEA_ROOT_PASSWORD:-admin123}
-      - GITEA__webhook__ALLOWED_HOST_LIST=*
-    ports:
-      - "${GITEA_HTTP_PORT:-3000}:3000"
-      - "${GITEA_SSH_PORT:-2222}:22"
-    volumes:
-      - gitea_data:/data
-    networks:
-      - gittranslate_net
-    depends_on:
-      db:
-        condition: service_healthy
-    healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:3000/ || exit 1"]
-      interval: 15s
-      timeout: 5s
-      retries: 10
-      start_period: 30s
-
-  # --- 3. Translation Worker (FastAPI) ---
   worker:
     build: ./worker
-    restart: always
+    restart: unless-stopped
     env_file: .env
     ports:
       - "${WORKER_PORT:-8000}:8000"
-    networks:
-      - gittranslate_net
     healthcheck:
       test: ["CMD-SHELL", "curl -f http://localhost:8000/ || exit 1"]
       interval: 30s
@@ -77,6 +16,5 @@ services:
       start_period: 10s
     volumes:
       - worker_state:/app/state
-    # Host access for Ollama on macOS/Windows/Linux
     extra_hosts:
       - "host.docker.internal:host-gateway"

@@ -1,72 +1,93 @@
 # GitTranslate
 
-Automated LaTeX translation system that watches a source Git repository and continuously syncs machine-translated content to a target repository using a local LLM via Ollama.
+Automatisiertes LaTeX-Übersetzungssystem, das ein Quell-Git-Repository beobachtet und maschinell übersetzte Inhalte mithilfe eines lokalen LLMs über Ollama kontinuierlich in ein Ziel-Repository synchronisiert.
 
-## What it does
+## Was es macht
 
-- **Delta translation** — on every push, only added/modified `.tex` files are translated; deleted files are removed from the target
-- **LaTeX-aware** — equations, code listings, `\label{}`, `\ref{}`, and file paths are never modified; only human-readable text is sent to the LLM
-- **Privacy-first** — translation runs entirely on your machine via [Ollama](https://ollama.com); no data leaves your infrastructure
-- **Flexible trigger modes** — webhook (push-driven) or polling (`POST /sync`), works with self-hosted Gitea and external providers (GitHub, GitLab)
+- **Delta-Übersetzung** — bei jedem Push werden nur hinzugefügte/geänderte `.tex`-Dateien übersetzt; gelöschte Dateien werden aus dem Ziel-Repo entfernt
+- **LaTeX-bewusst** — Gleichungen, Code-Listings, `\label{}`, `\ref{}` und Dateipfade werden nie verändert; nur menschenlesbarer Text wird an das LLM übergeben
+- **Datenschutz-First** — die Übersetzung läuft vollständig lokal via [Ollama](https://ollama.com); keine Daten verlassen die eigene Infrastruktur
+- **Flexible Auslösemodi** — Webhook (push-gesteuert) oder Polling (`POST /sync`), funktioniert mit GitHub, GitLab oder jedem Git-Anbieter
 
-## Quick start
+## Schnellstart
 
-**Prerequisites:** [Docker](https://www.docker.com/products/docker-desktop/) and [Ollama](https://ollama.com/download) installed on the host machine.
+**Voraussetzungen:** [Ollama](https://ollama.com/download) auf dem Host-Rechner installiert.
 
 ```bash
 ollama pull translategemma:4b
 cp .env.example .env
-# Edit .env — set SRC_GIT_URL, TARGET_GIT_URL, LLM_MODEL
+# .env bearbeiten — SRC_GIT_URL, TARGET_GIT_URL, Tokens und LLM_MODEL setzen
 ```
 
-| Mode | Command | When to use |
-|------|---------|-------------|
-| **Local Gitea** | `docker compose --profile local-git up -d` | Local dev / air-gapped |
-| **External Git** | `docker compose up -d` | GitHub, GitLab, any remote |
+### Mit Docker
 
-For Local Gitea, complete the first-run wizard at `http://localhost:3000`, create your repos, generate an access token, add it to `.env`, then rebuild the worker. See `docs/SETUP.md` for the full walkthrough.
+Zusätzliche Voraussetzung: [Docker](https://www.docker.com/products/docker-desktop/)
 
-For External Git, configure tokens in `.env` and trigger translation manually:
+In `.env` setzen: `LLM_API_URL=http://host.docker.internal:11434`
 
+```bash
+docker compose up -d
+curl -X POST http://localhost:8000/sync
+```
+
+### Ohne Docker
+
+Zusätzliche Voraussetzungen: Python 3.10+, Git
+
+In `.env` setzen: `STATE_DIR=./state`
+
+```bash
+cd worker
+pip install -r requirements.txt
+uvicorn main:app --host 0.0.0.0 --port 8000
+```
+
+Dann in einem anderen Terminal:
 ```bash
 curl -X POST http://localhost:8000/sync
 ```
 
-## Documentation
+Vollständige Anleitung: [docs/SETUP.md](docs/SETUP.md)
 
-| File | Description |
-|------|-------------|
-| [docs/SETUP.md](docs/SETUP.md) | Full setup guide — Local Gitea and External Git modes |
-| [docs/API.md](docs/API.md) | Worker HTTP API reference (`/webhook`, `/sync`, `/translate`) |
-| [docs/THESIS_STRUCTURE.md](docs/THESIS_STRUCTURE.md) | LaTeX structure guide for thesis authors |
+### Thesis-Struktur generieren
 
-German versions: [docs/SETUP_DE.md](docs/SETUP_DE.md) · [docs/API_DE.md](docs/API_DE.md) · [docs/THESIS_STRUCTURE_DE.md](docs/THESIS_STRUCTURE_DE.md)
-
-## Architecture
-
-```
-┌─────────────┐   push / webhook   ┌────────────────────────────────────────┐
-│  Source repo │ ─────────────────> │  Worker  (FastAPI, localhost:8000)     │
-│  (German)   │                    │  ├── latex_parser  (chunk splitter)    │
-└─────────────┘                    │  ├── llm_service   (Ollama client)     │
-                                   │  └── git_service   (clone / push)      │
-┌─────────────┐   commit + push    └────────────────────────────────────────┘
-│  Target repo │ <────────────────────────────────────────────────────────────
-│  (English)  │
-└─────────────┘
-
-Supporting services (Local Gitea mode only):
-  PostgreSQL  ←  Gitea (localhost:3000)
-  Ollama runs on host at localhost:11434
+```bash
+python init_thesis.py --title "Mein Titel" --author "Max Mustermann"
 ```
 
-**Worker service** (`worker/`):
-- `main.py` — FastAPI app with `/` health, `/webhook`, `/sync`, and `/translate` endpoints
-- `core/config.py` — Pydantic `BaseSettings`; all config via `.env`
-- `services/git_service.py` — Clones repos, commits/pushes results; masks tokens in logs
-- `services/latex_parser.py` — Splits LaTeX into preamble, translatable chunks, postamble
-- `services/llm_service.py` — Calls `POST /api/generate` on Ollama with a structured prompt
+Erstellt ein `thesis-de/`-Verzeichnis mit der empfohlenen LaTeX-Struktur (siehe [docs/THESIS_STRUCTURE.md](docs/THESIS_STRUCTURE.md)).
 
-## License
+## Dokumentation
 
-MIT — see [LICENSE](LICENSE).
+| Datei | Beschreibung |
+|-------|--------------|
+| [docs/SETUP.md](docs/SETUP.md) | Vollständige Einrichtungsanleitung |
+| [docs/API.md](docs/API.md) | Worker HTTP-API-Referenz (`/webhook`, `/sync`, `/translate`) |
+| [docs/THESIS_STRUCTURE.md](docs/THESIS_STRUCTURE.md) | LaTeX-Strukturleitfaden für Thesis-Autoren |
+
+## Architektur
+
+```
+┌──────────────┐   Push / Webhook   ┌────────────────────────────────────────┐
+│  Quell-Repo  │ ─────────────────> │  Worker  (FastAPI, localhost:8000)     │
+│  (Deutsch)   │                    │  ├── latex_parser  (Chunk-Splitter)    │
+└──────────────┘                    │  ├── llm_service   (Ollama-Client)     │
+                                    │  └── git_service   (Clone / Push)      │
+┌──────────────┐   Commit + Push    └────────────────────────────────────────┘
+│  Ziel-Repo   │ <────────────────────────────────────────────────────────────
+│  (Englisch)  │
+└──────────────┘
+
+Ollama läuft auf dem Host unter localhost:11434
+```
+
+**Worker-Dienst** (`worker/`):
+- `main.py` — FastAPI-App mit `/` Health-Check, `/webhook`, `/sync` und `/translate`
+- `core/config.py` — Pydantic `BaseSettings`; gesamte Konfiguration via `.env`
+- `services/git_service.py` — Klont Repos, committed/pusht Ergebnisse; maskiert Tokens in Logs
+- `services/latex_parser.py` — Teilt LaTeX in Präambel, übersetzbare Chunks und Postambel auf
+- `services/llm_service.py` — Ruft `POST /api/generate` auf Ollama mit strukturiertem Prompt auf
+
+## Lizenz
+
+MIT — siehe [LICENSE](LICENSE).

@@ -1,11 +1,16 @@
-# Bachelor/Master Thesis — LaTeX Structure Guide for GitTranslate
+# Bachelor-/Masterarbeit — LaTeX-Strukturleitfaden für GitTranslate
 
-## Recommended File Structure
+> **Tipp:** Die gesamte Struktur kann automatisch generiert werden:
+> ```bash
+> python init_thesis.py --title "Mein Titel" --author "Max Mustermann"
+> ```
+
+## Empfohlene Dateistruktur
 
 ```
-thesis-de/                        ← source repo (German)
-├── main.tex                      ← root document, \input{} calls only
-├── preamble.tex                  ← \usepackage{}, custom commands, etc.
+thesis-de/                        ← Quell-Repo (Deutsch)
+├── main.tex                      ← Wurzeldokument, nur \input{}-Aufrufe
+├── preamble.tex                  ← \usepackage{}, eigene Befehle usw.
 ├── chapters/
 │   ├── 01_introduction.tex
 │   ├── 02_background.tex
@@ -21,13 +26,13 @@ thesis-de/                        ← source repo (German)
 ```
 
 ```
-thesis-en/                        ← target repo (English, auto-generated)
-└── (mirrors thesis-de exactly)
+thesis-en/                        ← Ziel-Repo (Englisch, automatisch generiert)
+└── (spiegelt thesis-de exakt wider)
 ```
 
 ---
 
-## main.tex Template
+## main.tex-Vorlage
 
 ```latex
 \documentclass[12pt, a4paper]{scrreprt}
@@ -59,14 +64,14 @@ thesis-en/                        ← target repo (English, auto-generated)
 \end{document}
 ```
 
-**GitTranslate behaviour on `main.tex`:**
-- `\title{...}`, `\author{...}` → text inside braces is translated
-- `\input{chapters/01_introduction}` → path is never modified
-- `\maketitle`, `\tableofcontents` → passed through unchanged
+**GitTranslate-Verhalten bei `main.tex`:**
+- `\title{...}`, `\author{...}` → Text in geschweiften Klammern wird übersetzt
+- `\input{chapters/01_introduction}` → Pfad wird nie verändert
+- `\maketitle`, `\tableofcontents` → unverändert durchgereicht
 
 ---
 
-## Chapter File Template
+## Kapitel-Vorlage
 
 ```latex
 \chapter{Einleitung}
@@ -96,39 +101,39 @@ Die zentrale Frage dieser Arbeit lautet:
 \end{itemize}
 ```
 
-**What GitTranslate translates here:**
+**Was GitTranslate hier übersetzt:**
 - `\chapter{Einleitung}` → `\chapter{Introduction}` ✓
-- `\section{Motivation}` → `\section{Motivation}` ✓ (same in English)
-- `\label{chap:introduction}` → **unchanged** (labels must stay consistent across repos)
-- `\ref{sec:research_question}` → **unchanged** (references must match labels)
-- Paragraph text → translated ✓
+- `\section{Motivation}` → `\section{Motivation}` ✓ (im Englischen gleich)
+- `\label{chap:introduction}` → **unverändert** (Labels müssen in beiden Repos identisch bleiben)
+- `\ref{sec:research_question}` → **unverändert** (Referenzen müssen zu Labels passen)
+- Absatztext → übersetzt ✓
 
 ---
 
-## Equations and Math
+## Gleichungen und Mathematik
 
-Equations are **automatically skipped** by GitTranslate — they are never sent to the LLM.
+Gleichungen werden von GitTranslate **automatisch übersprungen** — sie werden nie an das LLM gesendet.
 
 ```latex
-% This entire block is passed through unchanged:
+% Dieser gesamte Block wird unverändert durchgereicht:
 \begin{equation}
     D = \sum_{i=1}^{n} (T_i \cdot t_{\text{infer}}) + t_{\text{overhead}}
     \label{eq:latency}
 \end{equation}
 
-% Inline math inside text IS processed (the surrounding text is translated):
+% Inline-Mathematik innerhalb von Text WIRD verarbeitet (der umgebende Text wird übersetzt):
 Die Gesamtlatenz beträgt $D$ Sekunden, wobei $n$ die Anzahl der Token ist.
 ```
 
-Supported math environments (all skipped): `equation`, `align`, `gather`, `multline`,
-`alignat`, `flalign`, `eqnarray`, `displaymath`, and their starred variants.
-Display math `\[...\]` is also skipped.
+Unterstützte Mathe-Umgebungen (alle übersprungen): `equation`, `align`, `gather`, `multline`,
+`alignat`, `flalign`, `eqnarray`, `displaymath` sowie deren Stern-Varianten.
+Abgesetzte Mathematik `\[...\]` wird ebenfalls übersprungen.
 
 ---
 
-## Code Listings
+## Code-Listings
 
-Code blocks are **automatically skipped** — never sent to the LLM.
+Code-Blöcke werden **automatisch übersprungen** — sie werden nie an das LLM gesendet.
 
 ```latex
 \begin{lstlisting}[language=Python, caption={Übersetzungsfunktion}]
@@ -137,12 +142,12 @@ def translate(text: str) -> str:
 \end{lstlisting}
 ```
 
-The `caption={}` text above **is** translated because it's part of surrounding text,
-not inside the `lstlisting` environment itself.
+Der `caption={}`-Text oben **wird** übersetzt, da er zum umgebenden Text gehört
+und sich nicht innerhalb der `lstlisting`-Umgebung selbst befindet.
 
 ---
 
-## Figures and Tables
+## Abbildungen und Tabellen
 
 ```latex
 \begin{figure}[htbp]
@@ -154,35 +159,37 @@ not inside the `lstlisting` environment itself.
 ```
 
 - `\caption{Architektur des Systems}` → `\caption{Architecture of the System}` ✓
-- `\includegraphics{figures/architecture}` → **unchanged** (file path preserved) ✓
-- `\label{fig:architecture}` → **unchanged** ✓
+- `\includegraphics{figures/architecture}` → **unverändert** (Dateipfad bleibt erhalten) ✓
+- `\label{fig:architecture}` → **unverändert** ✓
 
 ---
 
-## Important Rules for Consistent Cross-References
+## Wichtige Regeln für konsistente Querverweise
 
-Because both repos exist independently, `\label{}` identifiers **must be the same** in
-both the German source and the English target. GitTranslate preserves them automatically.
+Da beide Repos unabhängig voneinander existieren, **müssen** `\label{}`-Bezeichner in
+Quell- (Deutsch) und Ziel-Repo (Englisch) identisch sein. GitTranslate bewahrt sie automatisch.
 
-If you rename a label in the source, the target is updated on the next sync.
+Wird ein Label in der Quelle umbenannt, wird das Ziel beim nächsten Sync aktualisiert.
 
-**Do:**
+**Empfohlen:**
 ```latex
-\label{sec:methodology}   % stays the same in both repos
-\ref{sec:methodology}     % never translated
+\label{sec:methodology}   % bleibt in beiden Repos gleich
+\ref{sec:methodology}     % wird nie übersetzt
 ```
 
-**Avoid:** Labels with German words that you later want to change (they propagate as-is).
+**Vermeiden:** Labels mit deutschen Wörtern, die später geändert werden sollen (sie werden unverändert übernommen).
 
 ---
 
 ## preamble.tex
 
-Keep `preamble.tex` free of German text — it typically contains only commands and
-package settings which are not translated. If you do add comments in German, they
-will be translated too (comments starting with `%` are treated as regular text chunks).
+`preamble.tex` sollte keinen deutschen Text enthalten — sie enthält typischerweise nur
+Befehle und Paketeinstellungen, die nicht übersetzt werden. Werden dennoch deutsche
+Kommentare eingefügt, werden auch diese übersetzt (Kommentare mit `%` werden als
+normale Textblöcke behandelt).
 
-To prevent comment translation, put purely technical comments on the same line as code:
+Um die Übersetzung von Kommentaren zu verhindern, technische Kommentare direkt in
+dieselbe Zeile wie den Code schreiben:
 
 ```latex
 \usepackage[utf8]{inputenc}   % encoding — not translated (no blank line above/below)
@@ -190,12 +197,12 @@ To prevent comment translation, put purely technical comments on the same line a
 
 ---
 
-## Workflow When Writing the Thesis
+## Arbeitsablauf beim Schreiben der Arbeit
 
-1. **Write each chapter in its own file** under `chapters/`.
-2. **Push individual chapter files** — GitTranslate only re-translates changed files,
-   so pushing `chapters/03_methodology.tex` triggers translation of that file only.
-3. **Push `bibliography.bib`** — `.bib` files are copied to the target repo unchanged
-   (only `.tex` files are translated).
-4. **Figures** — `.pdf`, `.png`, `.jpg` etc. are copied unchanged.
-5. **Check the translated chapter** in `thesis-en/` before submitting.
+1. **Jedes Kapitel in einer eigenen Datei** unter `chapters/` verfassen.
+2. **Einzelne Kapitel-Dateien pushen** — GitTranslate übersetzt nur geänderte Dateien neu;
+   ein Push von `chapters/03_methodology.tex` löst ausschließlich die Übersetzung dieser Datei aus.
+3. **`bibliography.bib` pushen** — `.bib`-Dateien werden unverändert ins Ziel-Repo kopiert
+   (nur `.tex`-Dateien werden übersetzt).
+4. **Abbildungen** — `.pdf`, `.png`, `.jpg` usw. werden unverändert kopiert.
+5. **Das übersetzte Kapitel** in `thesis-en/` vor der Abgabe prüfen.

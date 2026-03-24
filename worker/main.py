@@ -36,7 +36,7 @@ app = FastAPI(
 )
 
 # --- State (persisted across restarts via mounted volume) ---
-STATE_FILE = Path("/app/state/sync_state.json")
+STATE_FILE = Path(settings.state_dir) / "sync_state.json"
 
 
 def _load_last_sha() -> Optional[str]:

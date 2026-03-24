@@ -1,42 +1,42 @@
 # GitTranslate Worker API
 
-The GitTranslate worker exposes a small HTTP API for health checks, webhook-triggered translation, manual sync, and on-demand translation of specific files. An interactive Swagger UI is available at `http://localhost:8000/docs` and ReDoc at `http://localhost:8000/redoc`.
+Der GitTranslate-Worker stellt eine kleine HTTP-API für Gesundheitschecks, Webhook-ausgelöste Übersetzungen, manuellen Sync sowie die bedarfsgesteuerte Übersetzung einzelner Dateien bereit. Eine interaktive Swagger-UI ist unter `http://localhost:8000/docs` und ReDoc unter `http://localhost:8000/redoc` erreichbar.
 
-## Base URL
+## Basis-URL
 
 ```
 http://localhost:8000
 ```
 
-(Port can be changed via Docker port mapping.)
+(Der Port kann über `WORKER_PORT` in `.env` oder den `--port`-Flag geändert werden.)
 
-## Authentication
+## Authentifizierung
 
-Most endpoints require no authentication. The `/webhook` endpoint optionally validates an HMAC-SHA256 signature when `WEBHOOK_SECRET` is configured.
+Die meisten Endpunkte erfordern keine Authentifizierung. Der `/webhook`-Endpunkt validiert optional eine HMAC-SHA256-Signatur, wenn `WEBHOOK_SECRET` konfiguriert ist.
 
 ---
 
-## Endpoints
+## Endpunkte
 
 ### GET /
 
-Health check. Returns current configuration and last-synced commit SHA.
+Gesundheitscheck. Gibt die aktuelle Konfiguration und den zuletzt synchronisierten Commit-SHA zurück.
 
-**Response `200 OK`**
+**Antwort `200 OK`**
 
 ```json
 {
   "status": "online",
-  "src": "http://gitea:3000/user/repo-de.git",
-  "target": "http://gitea:3000/user/repo-en.git",
-  "llm": "http://host.docker.internal:11434 (model: translategemma:4b)",
+  "src": "https://github.com/youruser/thesis-de.git",
+  "target": "https://github.com/youruser/thesis-en.git",
+  "llm": "http://localhost:11434 (model: translategemma:4b)",
   "translation": "de -> en",
   "poll_interval": 300,
   "last_synced_sha": "a1b2c3d4e5f6..."
 }
 ```
 
-**Example**
+**Beispiel**
 
 ```bash
 curl http://localhost:8000/
@@ -46,34 +46,34 @@ curl http://localhost:8000/
 
 ### POST /webhook
 
-Receives a Gitea push webhook, extracts added/modified/removed files from commit metadata, and enqueues a delta-translation job in the background.
+Empfängt einen Push-Webhook (GitHub, GitLab, Gitea, etc.), extrahiert hinzugefügte/geänderte/entfernte Dateien aus den Commit-Metadaten und stellt einen Delta-Übersetzungsauftrag in die Hintergrundwarteschlange.
 
-**Request headers (optional)**
+**Anfrage-Header (optional)**
 
-| Header | Description |
+| Header | Beschreibung |
 |---|---|
-| `X-Hub-Signature-256` | `sha256=<hex>` HMAC signature of the raw JSON body (GitHub) |
-| `X-Gitea-Signature` | `<hex>` HMAC signature (Gitea) |
-| `X-Gitlab-Token` | Raw plaintext secret (GitLab) — compared with constant-time equality |
+| `X-Hub-Signature-256` | `sha256=<hex>` HMAC-Signatur des rohen JSON-Bodys (GitHub) |
+| `X-Gitea-Signature` | `<hex>` HMAC-Signatur (Gitea) |
+| `X-Gitlab-Token` | Rohes Klartext-Geheimnis (GitLab) — Vergleich mit konstantem Zeitaufwand |
 
-If `WEBHOOK_SECRET` is set in `.env` and the signature/token is missing or invalid, the request is rejected with `401`.
+Wenn `WEBHOOK_SECRET` in `.env` gesetzt ist und die Signatur/das Token fehlt oder ungültig ist, wird die Anfrage mit `401` abgelehnt.
 
-**Request body** — raw Gitea push event JSON (sent automatically by Gitea).
+**Anfrage-Body** — Push-Event-JSON (wird automatisch vom Git-Anbieter gesendet).
 
-**Response `200 OK`**
+**Antwort `200 OK`**
 
 ```json
 { "status": "accepted" }
 ```
 
-**Error codes**
+**Fehlercodes**
 
-| Code | Reason |
+| Code | Ursache |
 |---|---|
-| `400` | Invalid JSON payload |
-| `401` | Missing or invalid HMAC signature |
+| `400` | Ungültige JSON-Nutzlast |
+| `401` | Fehlende oder ungültige HMAC-Signatur |
 
-**Example** (simulate a push event from a saved payload file)
+**Beispiel** (Push-Event aus einer gespeicherten Payload-Datei simulieren)
 
 ```bash
 curl -X POST http://localhost:8000/webhook \
@@ -85,25 +85,25 @@ curl -X POST http://localhost:8000/webhook \
 
 ### POST /sync
 
-Manually trigger a delta sync. The worker compares the source repo's current HEAD to the last-stored SHA, computes the diff, translates changed `.tex` files, and updates the stored SHA on success.
+Löst einen Delta-Sync manuell aus. Der Worker vergleicht den aktuellen HEAD des Quell-Repos mit dem zuletzt gespeicherten SHA, berechnet den Diff, übersetzt geänderte `.tex`-Dateien und aktualisiert bei Erfolg den gespeicherten SHA.
 
-This is equivalent to the automatic poll that runs every `POLL_INTERVAL` seconds (if enabled).
+Dies entspricht dem automatischen Poll, der alle `POLL_INTERVAL` Sekunden ausgeführt wird (sofern aktiviert).
 
-**Request body** — none.
+**Anfrage-Body** — keiner.
 
-**Response `200 OK`**
+**Antwort `200 OK`**
 
 ```json
 { "status": "accepted" }
 ```
 
-**Error codes**
+**Fehlercodes**
 
-| Code | Reason |
+| Code | Ursache |
 |---|---|
-| `409` | A sync job is already running |
+| `409` | Ein Sync-Auftrag läuft bereits |
 
-**Example**
+**Beispiel**
 
 ```bash
 curl -X POST http://localhost:8000/sync
@@ -113,31 +113,31 @@ curl -X POST http://localhost:8000/sync
 
 ### POST /translate
 
-Clone both repos, translate a specific list of `.tex` files, and push. Useful for re-translating files without waiting for a commit or when the ignore file would otherwise suppress them.
+Klont beide Repos, übersetzt eine bestimmte Liste von `.tex`-Dateien und pusht das Ergebnis. Nützlich, um Dateien neu zu übersetzen, ohne auf einen Commit zu warten oder wenn die Ignore-Datei sie andernfalls unterdrücken würde.
 
-**Request body** `application/json`
+**Anfrage-Body** `application/json`
 
-| Field | Type | Required | Default | Description |
+| Feld | Typ | Pflicht | Standard | Beschreibung |
 |---|---|---|---|---|
-| `paths` | `string[]` | yes | — | Relative paths of files to translate, e.g. `["chapters/01_intro.tex"]` |
-| `use_ignore` | `boolean` | no | `false` | When `true`, paths matched by `.gittranslate-ignore` are silently skipped (same behaviour as `/webhook` and `/sync`). When `false` (default), the ignore file is bypassed and all listed paths are translated. |
+| `paths` | `string[]` | ja | — | Relative Pfade der zu übersetzenden Dateien, z. B. `["chapters/01_intro.tex"]` |
+| `use_ignore` | `boolean` | nein | `false` | Wenn `true`, werden Pfade, die von `.gittranslate-ignore` erfasst werden, stillschweigend übersprungen (gleiches Verhalten wie `/webhook` und `/sync`). Wenn `false` (Standard), wird die Ignore-Datei umgangen und alle angegebenen Pfade werden übersetzt. |
 
-**Response `200 OK`**
+**Antwort `200 OK`**
 
 ```json
 { "status": "accepted", "paths": ["chapters/01_intro.tex"] }
 ```
 
-**Error codes**
+**Fehlercodes**
 
-| Code | Reason |
+| Code | Ursache |
 |---|---|
-| `409` | A sync job is already running |
-| `422` | Request body validation error (e.g. `paths` missing) |
+| `409` | Ein Sync-Auftrag läuft bereits |
+| `422` | Validierungsfehler im Anfrage-Body (z. B. `paths` fehlt) |
 
-**Examples**
+**Beispiele**
 
-Translate two files, bypassing `.gittranslate-ignore` (default):
+Zwei Dateien übersetzen, `.gittranslate-ignore` umgehen (Standard):
 
 ```bash
 curl -X POST http://localhost:8000/translate \
@@ -145,7 +145,7 @@ curl -X POST http://localhost:8000/translate \
   -d '{"paths": ["chapters/01_introduction.tex", "chapters/03_methodology.tex"]}'
 ```
 
-Translate with ignore file respected:
+Mit Berücksichtigung der Ignore-Datei übersetzen:
 
 ```bash
 curl -X POST http://localhost:8000/translate \
@@ -157,27 +157,27 @@ curl -X POST http://localhost:8000/translate \
 
 ## .gittranslate-ignore
 
-Place a `.gittranslate-ignore` file in the **source repo root** to exclude files from automatic translation. The format mirrors `.gitignore`:
+Lege eine `.gittranslate-ignore`-Datei im **Wurzelverzeichnis des Quell-Repos** ab, um Dateien von der automatischen Übersetzung auszuschließen. Das Format orientiert sich an `.gitignore`:
 
-- One glob pattern per line (matched with Python's `fnmatch`)
-- Lines starting with `#` are comments
-- Blank lines are ignored
+- Ein Glob-Muster pro Zeile (abgeglichen mit Pythons `fnmatch`)
+- Zeilen, die mit `#` beginnen, sind Kommentare
+- Leerzeilen werden ignoriert
 
-**Example `.gittranslate-ignore`**
+**Beispiel `.gittranslate-ignore`**
 
 ```
-# Auto-generated files — do not translate
+# Automatisch generierte Dateien — nicht übersetzen
 generated/*.tex
 appendices/raw_data.tex
 
-# Boilerplate unchanged between languages
+# Vorlagen, die in beiden Sprachen identisch sind
 preamble.tex
 ```
 
-**Which endpoints respect it**
+**Welche Endpunkte die Ignore-Datei berücksichtigen**
 
-| Endpoint | Respects ignore file? |
+| Endpunkt | Berücksichtigt Ignore-Datei? |
 |---|---|
-| `POST /webhook` | Always yes |
-| `POST /sync` | Always yes |
-| `POST /translate` | Only when `use_ignore: true` is set |
+| `POST /webhook` | Immer ja |
+| `POST /sync` | Immer ja |
+| `POST /translate` | Nur wenn `use_ignore: true` gesetzt ist |

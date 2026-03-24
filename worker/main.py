@@ -141,7 +141,9 @@ def _apply_delta(
 
             logger.debug(f"Translating paragraph {i + 1}/{len(parsed['chunks'])} in {tex_file_rel_path}...")
             try:
-                translated_chunks.append(llm.translate_latex(chunk))
+                protected, store = parser.protect(chunk)
+                translated = llm.translate_latex(protected)
+                translated_chunks.append(parser.restore(translated, store))
             except Exception as e:
                 logger.error(f"Error on paragraph {i + 1}: {e}")
                 translated_chunks.append(chunk)

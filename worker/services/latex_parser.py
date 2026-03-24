@@ -1,24 +1,35 @@
 import re
 import logging
+from typing import Tuple
 
 logger = logging.getLogger(__name__)
 
-# Environments that should NEVER be sent to the LLM — their content is not translatable text.
-_PASSTHROUGH_ENV_RE = re.compile(
-    r'\\begin\{'
-    r'(equation\*?|align\*?|alignat\*?|flalign\*?|gather\*?|multline\*?|'
+# ---------------------------------------------------------------------------
+# Passthrough environments — chunks consisting entirely of these are skipped.
+# ---------------------------------------------------------------------------
+
+_PASSTHROUGH_ENVS = (
+    r'equation\*?|align\*?|alignat\*?|flalign\*?|gather\*?|multline\*?|'
     r'eqnarray\*?|displaymath|math|'
     r'lstlisting|verbatim|Verbatim|minted|'
     r'tikzpicture|pgfpicture|forest|circuitikz|'
-    r'filecontents\*?)'
-    r'\}'
+    r'filecontents\*?'
+)
+
+# Matches only if the *entire* chunk is one passthrough environment
+# (with optional trailing whitespace). Uses a backreference (\1) to ensure
+# \begin{env} and \end{env} refer to the same environment name.
+_FULL_ENV_RE = re.compile(
+    r'^\s*\\begin\{(' + _PASSTHROUGH_ENVS + r')\}'
+    r'.*?'
+    r'\\end\{\1\}\s*$',
+    re.DOTALL,
 )
 
 # Display math \[ ... \]
 _DISPLAY_MATH_RE = re.compile(r'^\s*\\\[.*\\\]\s*$', re.DOTALL)
 
 # Commands whose arguments are never translatable prose.
-# A line matching this pattern carries no human-readable text.
 _STRUCTURAL_LINE_RE = re.compile(
     r'^\s*\\(?:'
     r'newpage|clearpage|cleardoublepage|'
@@ -32,6 +43,31 @@ _STRUCTURAL_LINE_RE = re.compile(
     r'input|include|includeonly|includegraphics'
     r')(?:\*)?(?:\[.*?\])?(?:\{[^{}]*\})*\s*$'
 )
+
+# ---------------------------------------------------------------------------
+# Placeholder protection for inline elements
+# ---------------------------------------------------------------------------
+
+# Unicode brackets used as placeholder delimiters — never appear in LaTeX.
+_PH_L, _PH_R = "\u27e6", "\u27e7"   # ⟦ ⟧
+
+# Order matters: longer / more specific patterns first to avoid partial matches.
+_PROTECT_PATTERNS = [
+    # Display math  \[...\]
+    re.compile(r'\\\[.*?\\\]', re.DOTALL),
+    # Inline math  $...$  (not $$)
+    re.compile(r'(?<!\$)\$(?!\$)(.+?)(?<!\$)\$(?!\$)', re.DOTALL),
+    # Reference commands (incl. optional arguments)
+    re.compile(r'\\(?:auto|page|eq|c|C)?ref\{[^}]*\}'),
+    # Citations (with optional argument)
+    re.compile(r'\\cite(?:\[[^\]]*\])?\{[^}]*\}'),
+    # Labels
+    re.compile(r'\\label\{[^}]*\}'),
+    # File includes (with optional argument)
+    re.compile(r'\\(?:input|include|includegraphics)(?:\[[^\]]*\])?\{[^}]*\}'),
+    # URLs
+    re.compile(r'\\url\{[^}]*\}'),
+]
 
 
 def _is_structural_only(chunk: str) -> bool:
@@ -49,19 +85,46 @@ class LatexParser:
     def is_passthrough_chunk(self, chunk: str) -> bool:
         """
         Returns True if the chunk should NOT be sent to the LLM.
-        Matches chunks that consist entirely of math or code environments,
-        display-math blocks, or structural-only commands with no translatable text.
+        Matches chunks that consist *entirely* of a single math/code environment,
+        a display-math block, or structural-only commands with no translatable text.
         """
         stripped = chunk.strip()
         if not stripped:
             return True
-        if _PASSTHROUGH_ENV_RE.search(stripped):
+        if _FULL_ENV_RE.match(stripped):
             return True
         if _DISPLAY_MATH_RE.match(stripped):
             return True
         if _is_structural_only(stripped):
             return True
         return False
+
+    def protect(self, text: str) -> Tuple[str, dict]:
+        """
+        Replace inline math, references, labels, and file commands with
+        numbered placeholders (⟦0⟧, ⟦1⟧, …) so the LLM cannot modify them.
+        Returns the protected text and a store dict for restoration.
+        """
+        store = {}
+        counter = 0
+
+        def _replace(m):
+            nonlocal counter
+            key = f"{_PH_L}{counter}{_PH_R}"
+            store[key] = m.group(0)
+            counter += 1
+            return key
+
+        for pattern in _PROTECT_PATTERNS:
+            text = pattern.sub(_replace, text)
+
+        return text, store
+
+    def restore(self, text: str, store: dict) -> str:
+        """Restore placeholders back to original LaTeX fragments."""
+        for key, original in store.items():
+            text = text.replace(key, original)
+        return text
 
     def parse_and_chunk(self, tex_content: str) -> dict:
         """

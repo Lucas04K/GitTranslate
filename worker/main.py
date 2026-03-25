@@ -396,6 +396,11 @@ async def _run_locked_sync():
         await asyncio.get_event_loop().run_in_executor(None, process_sync_job)
 
 
+async def _run_locked_webhook(payload: dict):
+    async with _sync_lock:
+        await asyncio.get_event_loop().run_in_executor(None, process_translation_job, payload)
+
+
 # --- Polling loop ---
 @app.on_event("startup")
 async def start_poller():
@@ -468,7 +473,7 @@ async def webhook(request: Request, background_tasks: BackgroundTasks):
     except Exception:
         raise HTTPException(status_code=400, detail="Invalid JSON payload")
 
-    background_tasks.add_task(process_translation_job, payload)
+    background_tasks.add_task(_run_locked_webhook, payload)
     return {"status": "accepted"}
 
 
@@ -514,6 +519,16 @@ def _process_hard_reset():
 
             all_files_output = git._run_command(["git", "ls-files"], cwd=src_dir)
             changed_files = set(all_files_output.splitlines())
+
+            # Remove files from target that no longer exist in source
+            target_files_output = git._run_command(["git", "ls-files"], cwd=target_dir)
+            target_files = set(target_files_output.splitlines())
+            orphans = target_files - changed_files
+            for orphan in orphans:
+                orphan_path = os.path.join(target_dir, orphan)
+                if os.path.exists(orphan_path):
+                    os.remove(orphan_path)
+                    logger.info(f"Hard reset: removed orphan {orphan}")
 
             state = _apply_delta(
                 git, llm, parser,

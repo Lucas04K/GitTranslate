@@ -122,8 +122,23 @@ class LatexParser:
 
     def restore(self, text: str, store: dict) -> str:
         """Restore placeholders back to original LaTeX fragments."""
+        # Build index: number → original, for regex fallback
+        index: dict[int, str] = {}
         for key, original in store.items():
             text = text.replace(key, original)
+            # Extract the number from ⟦N⟧
+            num_str = key.lstrip(_PH_L).rstrip(_PH_R)
+            if num_str.isdigit():
+                index[int(num_str)] = original
+
+        # Fallback: LLM may replace Unicode ⟦N⟧ with [N] — only replace
+        # if the number matches a known placeholder to avoid collisions
+        if index:
+            def _fallback(m):
+                n = int(m.group(1))
+                return index[n] if n in index else m.group(0)
+            text = re.sub(r'\[(\d+)\]', _fallback, text)
+
         return text
 
     def parse_and_chunk(self, tex_content: str) -> dict:

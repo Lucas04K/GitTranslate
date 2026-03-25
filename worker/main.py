@@ -96,17 +96,17 @@ def _apply_delta(
     apply_ignore: bool = True,
     commit_msg: Optional[str] = None,
 ) -> dict:
+    tex_to_translate = {f for f in changed_files if f.endswith(".tex")}
+
+    # .gittranslate-ignore only skips translation, files are still copied
     if apply_ignore:
         ignore_patterns = _load_ignore_patterns(Path(src_dir))
         if ignore_patterns:
-            before = len(changed_files)
-            changed_files = {f for f in changed_files if not _is_ignored(f, ignore_patterns)}
-            removed_files = {f for f in removed_files if not _is_ignored(f, ignore_patterns)}
-            skipped = before - len(changed_files)
+            before = len(tex_to_translate)
+            tex_to_translate = {f for f in tex_to_translate if not _is_ignored(f, ignore_patterns)}
+            skipped = before - len(tex_to_translate)
             if skipped:
-                logger.info("Skipped %d file(s) due to .gittranslate-ignore", skipped)
-
-    tex_to_translate = {f for f in changed_files if f.endswith(".tex")}
+                logger.info("Skipped %d file(s) from translation due to .gittranslate-ignore", skipped)
 
     # Determine which tex files are retry-only (source unchanged, only failed chunks)
     retry_only_tex: dict[str, list[int]] = {}
@@ -478,6 +478,60 @@ async def sync(background_tasks: BackgroundTasks):
         raise HTTPException(status_code=409, detail="Sync already in progress")
     background_tasks.add_task(_run_locked_sync)
     return {"status": "accepted"}
+
+
+@app.post("/hard-reset", summary="Wipe state and re-translate everything from scratch")
+async def hard_reset(background_tasks: BackgroundTasks):
+    """
+    Reset all translation state and re-translate every `.tex` file from scratch.
+    Clones source, overwrites the entire target repo content, translates all `.tex` files, and pushes.
+    """
+    if _sync_lock.locked():
+        raise HTTPException(status_code=409, detail="Sync already in progress")
+    background_tasks.add_task(_run_locked_hard_reset)
+    return {"status": "accepted", "message": "Hard reset started — all files will be re-translated"}
+
+
+async def _run_locked_hard_reset():
+    async with _sync_lock:
+        await asyncio.get_event_loop().run_in_executor(None, _process_hard_reset)
+
+
+def _process_hard_reset():
+    """Wipe state, copy everything, translate all .tex files."""
+    logger.info("Starting hard reset — re-translating everything from scratch...")
+    git = GitService()
+    llm = LLMService()
+    parser = LatexParser()
+    state = {"last_sha": None, "files": {}}
+
+    with tempfile.TemporaryDirectory() as temp_dir:
+        src_dir = os.path.join(temp_dir, "src")
+        target_dir = os.path.join(temp_dir, "target")
+        try:
+            git.clone_src(src_dir)
+            git.clone_target(target_dir)
+
+            all_files_output = git._run_command(["git", "ls-files"], cwd=src_dir)
+            changed_files = set(all_files_output.splitlines())
+
+            state = _apply_delta(
+                git, llm, parser,
+                src_dir, target_dir,
+                changed_files=changed_files,
+                removed_files=set(),
+                state=state,
+                commit_msg="GitTranslate: hard reset — full re-translation",
+            )
+
+            head_sha = git._run_command(
+                ["git", "rev-parse", "HEAD"], cwd=src_dir
+            ).strip()
+            state["last_sha"] = head_sha
+            _save_state(state)
+            logger.info("Hard reset completed successfully.")
+        except Exception as e:
+            logger.error(f"Hard reset failed: {e}")
 
 
 @app.post("/translate", summary="Translate specific file paths on demand")
